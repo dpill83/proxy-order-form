@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MTG Proxy Order Form</title>
+  <base href="/proxy-order-form/">
+  <!-- Cache Bust (final attempt): ${new Date().toISOString()} -->
+  <!-- Development versions of React -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+  <script src="./js/shared.js"></script>
+  <style>
+    /* Add some basic styles to ensure the root div is visible */
+    #root {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+  </style>
+  <link rel="stylesheet" href="./css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <!-- <script>alert('Hello from GitHub Pages!');</script> TEMPORARILY REMOVED -->
+  <div id="root"></div>
+  <script type="text/babel">
+    // Add error boundary
+    class ErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+      }
+
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+
+      componentDidCatch(error, errorInfo) {
+        console.error('Error:', error);
+        console.error('Error Info:', errorInfo);
+      }
+
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="p-4 bg-red-50 text-red-700 rounded-lg">
+              <h2 className="text-lg font-bold mb-2">Something went wrong</h2>
+              <p>{this.state.error?.toString()}</p>
+            </div>
+          );
+        }
+
+        return this.props.children;
+      }
+    }
+
+    const { useState, useEffect, useRef } = React;
+    const { debounce, loadOrder, saveOrder, calculatePrice } = window.ProxyOrderSystem;
+
+    // CardSearch Component
+    function CardSearch({ onAdd, onPreview }) {
+      const [searchTerm, setSearchTerm] = useState('');
+      const [suggestions, setSuggestions] = useState([]);
+      const [results, setResults] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
+      const [bulkInput, setBulkInput] = useState('');
+      const inputRef = useRef();
+      const suggestionListRef = useRef();
+
+      // Combined Add Cards handler
+      const handleAddCards = async () => {
+        setLoading(true);
+        setError(null);
+        let added = false;
+        // Add from search box
+        if (searchTerm.trim()) {
+          try {
+            await new Promise((r) => setTimeout(r, 120));
+            const res = await axios.get(`https://api.scryfall.com/cards/search?q=${encodeURIComponent(searchTerm)}`);
+            if (res.data.data && res.data.data.length > 0) {
+              onAdd(res.data.data[0]);
+              added = true;
+            }
+          } catch (e) {
+            setError('Error fetching card from search.');
+          }
+        }
+        // Add from bulk input
+        if (bulkInput.trim()) {
+          const lines = bulkInput.split('\n').map(line => line.trim()).filter(Boolean);
+          try {
+            for (const line of lines) {
+              const match = line.match(/^\d*\s*([^(]+?)(?:\s*\(([^)]+)\)(?:\s+(\d+))?)?$/);
+              if (match) {
+                const [_, cardName, setCode, collectorNumber] = match;
+                const searchQuery = cardName.trim();
+                await new Promise(r => setTimeout(r, 120));
+                const res = await axios.get(`https://api.scryfall.com/cards/search?q=${encodeURIComponent(searchQuery)}`);
+                if (res.data.data && res.data.data.length > 0) {
+                  let card = res.data.data[0];
+                  if (setCode) {
+                    const exactMatch = res.data.data.find(c => 
+                      c.set.toLowerCase() === setCode.toLowerCase() || 
+                      c.set_name.toLowerCase().includes(setCode.toLowerCase())
+                    );
+                    if (exactMatch) card = exactMatch;
+                  }
+                  onAdd(card);
+                  added = true;
+                }
+              }
+            }
+            setBulkInput('');
+          } catch (e) {
+            setError('Error processing bulk input.');
+          }
+        }
+        if (added) setSearchTerm('');
+        setLoading(false);
+      };
+
+      // Add card by exact name
+      const addCardByExactName = async (name) => {
+        setLoading(true);
+        setError(null);
+        try {
+          const res = await axios.get(`https://api.scryfall.com/cards/named?exact=${encodeURIComponent(name)}`);
+          if (res.data) {
+            onAdd(res.data);
+            setSearchTerm('');
+            setSuggestions([]);
+          }
+        } catch (e) {
+          setError('Error fetching card.');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      // Debounced autocomplete
+      const fetchSuggestions = debounce(async (term) => {
+        if (!term) return setSuggestions([]);
+        try {
+          const res = await axios.get(`https://api.scryfall.com/cards/autocomplete?q=${encodeURIComponent(term)}`);
+          setSuggestions(res.data.data || []);
+        } catch {
+          setSuggestions([]);
+        }
+      }, 200);
+
+      useEffect(() => {
+        fetchSuggestions(searchTerm);
+      }, [searchTerm]);
+
+      // Keyboard navigation for suggestions
+      const handleKeyDown = (e) => {
+        if (suggestions.length === 0) return;
+        if (e.key === 'ArrowDown') {
+          setSelectedSuggestion((prev) => Math.min(prev + 1, suggestions.length - 1));
+        } else if (e.key === 'ArrowUp') {
+          setSelectedSuggestion((prev) => Math.max(prev - 1, 0));
+        } else if (e.key === 'Enter') {
+          if (selectedSuggestion >= 0) {
+            addCardByExactName(suggestions[selectedSuggestion]);
+          }
+        }
+      };
+
+      return (
+        <section aria-labelledby="card-search-heading" className="mb-6">
+          <h2 id="card-search-heading" className="sr-only">Card Search</h2>
+
+          {/* Search for a Magic card */}
+          <label htmlFor="card-search" className="block text-sm font-medium text-gray-700 mb-1">Search for a Magic card</label>
+          <div className="relative mb-6">
+            <input
+              id="card-search"
+              ref={inputRef}
+              type="text"
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+              placeholder="Start typing a card name..."
+              value={searchTerm}
+              onChange={e => {
+                setSearchTerm(e.target.value);
+                setSelectedSuggestion(-1);
+              }}
+              onKeyDown={handleKeyDown}
+              aria-autocomplete="list"
+              aria-controls="card-suggestions"
+              aria-activedescendant={selectedSuggestion >= 0 ? `suggestion-${selectedSuggestion}` : undefined}
+              autoComplete="off"
+            />
+            {suggestions.length > 0 && (
+              <ul
+                id="card-suggestions"
+                ref={suggestionListRef}
+                className="absolute z-10 bg-white border w-full mt-1 rounded shadow max-h-48 overflow-auto"
+                role="listbox"
+              >
+                {suggestions.map((s, i) => (
+                  <li
+                    key={s}
+                    id={`suggestion-${i}`}
+                    className={`px-3 py-1 cursor-pointer ${i === selectedSuggestion ? 'bg-blue-100' : ''}`}
+                    role="option"
+                    aria-selected={i === selectedSuggestion}
+                    tabIndex={-1}
+                    onMouseDown={() => {
+                      addCardByExactName(s);
+                    }}
+                  >
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Bulk Input Section */}
+          <div className="mb-6">
+            <label htmlFor="bulk-input" className="block text-sm font-medium text-gray-700 mb-1">
+              Bulk Add Cards
+            </label>
+            <textarea
+              id="bulk-input"
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400 h-32"
+              placeholder="Paste card names here, one per line. Format: 1 Card Name (set) 123"
+              value={bulkInput}
+              onChange={e => setBulkInput(e.target.value)}
+            />
+          </div>
+
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            onClick={handleAddCards}
+            disabled={loading}
+          >
+            Add Cards
+          </button>
+          {loading && <p className="mt-2 text-blue-600">Loading...</p>}
+          {error && <p className="mt-2 text-red-600">{error}</p>}
+        </section>
+      );
+    }
+
+    // AddToOrderButton: Handles add
+    function AddToOrderButton({ card, onAdd }) {
+      return (
+        <button
+          className="bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400"
+          onClick={() => onAdd(card)}
+          aria-label={`Add ${card.name} to order`}
+        >
+          Add
+        </button>
+      );
+    }
+
+    // OrderList Component
+    function OrderList({ order, onUpdateQty, onRemove, onPreview, onClearAll, onReplaceCardVersion }) {
+      const [availableSets, setAvailableSets] = useState({});
+      const [previewCard, setPreviewCard] = useState(null);
+
+      // Fetch available sets for each card
+      useEffect(() => {
+        const fetchSets = async () => {
+          for (const item of order) {
+            if (!availableSets[item.name]) {
+              try {
+                const res = await axios.get(`https://api.scryfall.com/cards/search?q=!\"${item.name}\" unique:prints`);
+                if (res.data.data) {
+                  setAvailableSets(prev => ({
+                    ...prev,
+                    [item.name]: res.data.data
+                  }));
+                }
+              } catch (e) {
+                console.error(`Error fetching sets for ${item.name}:`, e);
+              }
+            }
+          }
+        };
+        fetchSets();
+      }, [order]);
+
+      // Update card in order when set is changed
+      const handleSetChange = (item, newSet, newCollectorNumber) => {
+        const sets = availableSets[item.name] || [];
+        const newCard = sets.find(c => c.set === newSet && c.collector_number === newCollectorNumber);
+        if (newCard) {
+          // Replace the card in the order array
+          onReplaceCardVersion(item, {
+            id: newCard.id,
+            name: newCard.name,
+            set: newCard.set,
+            set_name: newCard.set_name,
+            image_uris: newCard.image_uris,
+            card_faces: newCard.card_faces,
+            collector_number: newCard.collector_number,
+            type_line: newCard.type_line,
+          });
+        }
+      };
+
+      // Overlay close handler
+      const handleOverlayClose = (e) => {
+        if (e.target === e.currentTarget) setPreviewCard(null);
+      };
+
+      return (
+        <section aria-labelledby="order-list-heading" className="mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Order List</h2>
+            {order.length > 0 && (
+              <button
+                className="text-xs bg-red-100 text-red-700 px-3 py-1 rounded hover:bg-red-200 focus:outline-none"
+                onClick={onClearAll}
+              >
+                Clear All
+              </button>
+            )}
+          </div>
+          {order.length === 0 ? (
+            <p className="text-gray-500">No cards in your order yet.</p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {order.map((item) => (
+                <div key={item.id + item.set + item.collector_number} className="border rounded-lg p-2 bg-white shadow-sm flex flex-col items-center cursor-pointer"
+                  onClick={() => setPreviewCard(item)}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`Preview ${item.name}`}
+                >
+                  <div className="flex justify-between items-start w-full mb-1">
+                    <h3 className="font-medium text-xs truncate" style={{ fontSize: '0.85rem', lineHeight: '1.1' }}>{item.name}</h3>
+                    <button
+                      className="text-red-600 hover:text-red-800 ml-2"
+                      onClick={e => { e.stopPropagation(); onRemove(item); }}
+                      aria-label={`Remove ${item.name} from order`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <img
+                    src={item.image_uris?.small || item.card_faces?.[0]?.image_uris?.small}
+                    alt={item.name}
+                    className="w-40 h-56 object-contain rounded mb-2 border"
+                  />
+                  <select
+                    value={item.set + '|' + item.collector_number}
+                    onChange={e => {
+                      const [set, num] = e.target.value.split('|');
+                      handleSetChange(item, set, num);
+                    }}
+                    className="w-full p-1 border rounded text-xs max-w-full truncate"
+                    style={{ maxWidth: '120px', fontSize: '0.8rem' }}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {availableSets[item.name]?.map(card => (
+                      <option key={card.set + card.collector_number} value={card.set + '|' + card.collector_number} className="truncate">
+                        {card.set.toUpperCase()} #{card.collector_number}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Overlay for large card preview */}
+          {previewCard && (
+            <div
+              className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50"
+              onClick={handleOverlayClose}
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="bg-white rounded-lg shadow-lg p-4 max-w-md w-full relative flex flex-col items-center cursor-pointer"
+                onClick={() => setPreviewCard(null)}
+              >
+                <img
+                  src={
+                    previewCard.card_faces
+                      ? previewCard.card_faces[0]?.image_uris?.normal
+                      : previewCard.image_uris?.normal
+                  }
+                  alt={previewCard.name}
+                  className="w-72 h-auto mb-2 rounded shadow"
+                />
+                <div className="mt-2 text-center">
+                  <div className="font-bold text-lg">{previewCard.name}</div>
+                  <div className="text-xs text-gray-500">{previewCard.set_name} ({previewCard.set?.toUpperCase()}) #{previewCard.collector_number}</div>
+                  <div className="text-xs text-gray-500">{previewCard.type_line}</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+      );
+    }
+
+    // CardPreview Component
+    function CardPreview({ card, onClose }) {
+      const [face, setFace] = useState(0); // 0: front, 1: back
+      if (!card) return null;
+      // Support double-faced cards
+      const faces = card.card_faces || [card];
+      const hasBack = faces.length > 1 || card.image_uris?.back;
+      const imageUrl = faces[face]?.image_uris?.normal || card.image_uris?.normal;
+      const backUrl = faces[1]?.image_uris?.normal || card.image_uris?.back;
+      return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-label="Card preview">
+          <div className="bg-white rounded-lg shadow-lg p-4 max-w-md w-full relative">
+            <button
+              className="absolute top-2 right-2 text-gray-500 hover:text-gray-800 focus:outline-none"
+              onClick={onClose}
+              aria-label="Close preview"
+            >
+              ×
+            </button>
+            <div className="flex flex-col items-center">
+              <img src={imageUrl} alt={card.name} className="w-64 h-auto mb-2 rounded shadow" />
+              {hasBack && (
+                <button
+                  className="mt-2 text-blue-600 underline text-sm focus:outline-none"
+                  onClick={() => setFace(face === 0 ? 1 : 0)}
+                  aria-label="Toggle card face"
+                >
+                  {face === 0 ? 'Show Back' : 'Show Front'}
+                </button>
+              )}
+              <div className="mt-2 text-center">
+                <div className="font-bold">{card.name}</div>
+                <div className="text-xs text-gray-500">{card.set_name}</div>
+                <div className="text-xs text-gray-500">{card.type_line}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // PricingSummary Component
+    function PricingSummary({ order, shipping }) {
+      const totalCards = order.length;
+      const basePrice = 0.50; // Tier 1 pricing
+      const cardsInTier = Math.floor(totalCards / 8) * 8;
+      const extraCards = totalCards % 8;
+      
+      const tierPrice = window.ProxyOrderSystem.calculatePrice(cardsInTier);
+      const extraPrice = extraCards * basePrice;
+      
+      const subtotal = (cardsInTier * tierPrice) + extraPrice;
+      const shippingCost = shipping === 'ship' ? 5.00 : 0.00;
+      const total = subtotal + shippingCost;
+
+      return (
+        <section aria-labelledby="pricing-summary-heading" className="mb-6">
+          <h2 id="pricing-summary-heading" className="text-xl font-bold mb-2">Pricing Summary</h2>
+          <ul className="text-sm">
+            {cardsInTier > 0 && (
+              <li>
+                Cards in Tier ({cardsInTier}): 
+                <span className="float-right">{cardsInTier} × ${tierPrice.toFixed(2)}</span>
+              </li>
+            )}
+            {extraCards > 0 && (
+              <li className="text-amber-600">
+                Extra Cards ({extraCards}): 
+                <span className="float-right">{extraCards} × ${basePrice.toFixed(2)}</span>
+              </li>
+            )}
+            <li>Subtotal: <span className="float-right">${subtotal.toFixed(2)}</span></li>
+            <li>Shipping ({shipping === 'ship' ? 'Ship' : 'Local Pickup'}): <span className="float-right">${shippingCost.toFixed(2)}</span></li>
+            <li className="font-bold mt-2">Total: <span className="float-right">${total.toFixed(2)}</span></li>
+          </ul>
+          {extraCards > 0 && (
+            <div className="mt-2 text-sm text-amber-600">
+              Note: Orders are priced in multiples of 8. Extra cards are charged at ${basePrice.toFixed(2)} each.
+            </div>
+          )}
+        </section>
+      );
+    }
+
+    // LaminateSelector Component
+    function LaminateSelector({ value, onChange }) {
+      return (
+        <div className="border rounded-lg p-4 bg-white shadow-sm flex flex-col items-center w-40 mr-4">
+          <div className="w-full mb-2 flex justify-center">
+            <h3 className="font-medium text-base truncate text-center" style={{ fontSize: '1rem', lineHeight: '1.2' }}>Laminate</h3>
+          </div>
+          <select
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            className="w-full p-2 border rounded text-base"
+          >
+            <option value="glossy">Glossy</option>
+            <option value="matte">Matte</option>
+          </select>
+        </div>
+      );
+    }
+
+    // CardBackSelector Component
+    function CardBackSelector({ backOptions, selected, onChange }) {
+      const current = backOptions.find(opt => opt.value === selected) || backOptions[0];
+      return (
+        <div className="w-full h-full flex flex-col">
+          {/* Title: top-left */}
+          <div className="w-full mb-2 flex justify-start self-start">
+            <h3 className="text-lg font-semibold mb-4">Card Back</h3>
+          </div>
+
+          {/* Image and Dropdown: centered horizontally and vertically, takes remaining vertical space */}
+          <div className="flex flex-col items-center justify-center flex-grow mx-auto">
+            <img
+              src={current.img}
+              alt={current.name}
+              className="w-40 h-56 object-contain rounded mb-2 border border-black"
+            />
+            <select
+              value={selected}
+              onChange={e => onChange(e.target.value)}
+              className="w-full p-1 border rounded text-xs max-w-full truncate"
+              style={{ maxWidth: '120px', fontSize: '0.8rem' }}
+            >
+              {backOptions.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      );
+    }
+
+    // ReturnToTop Component
+    function ReturnToTop() {
+      const [showButton, setShowButton] = useState(false);
+
+      useEffect(() => {
+        const handleScroll = () => {
+          setShowButton(window.scrollY > 300);
+        };
+
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+      }, []);
+
+      const scrollToTop = () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+
+      if (!showButton) return null;
+
+      return (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-8 right-8 bg-blue-600 text-white p-3 rounded-full shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          aria-label="Return to top"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+          </svg>
+        </button>
+      );
+    }
+
+    // ShippingSelector Component
+    function ShippingSelector({ value, onChange }) {
+      return (
+        <div className="border rounded-lg p-4 bg-white shadow-sm flex flex-col items-center w-40">
+          <div className="w-full mb-2 flex justify-center">
+            <h3 className="font-medium text-base truncate text-center" style={{ fontSize: '1rem', lineHeight: '1.2' }}>Shipping</h3>
+          </div>
+          <select
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            className="w-full p-2 border rounded text-base"
+          >
+            <option value="local">Local Pickup</option>
+            <option value="ship">Ship</option>
+          </select>
+        </div>
+      );
+    }
+
+    // CheckoutButton Component
+    function CheckoutButton({ order, onCheckout }) {
+      const totalCards = order.length;
+      const extraCards = totalCards % 8;
+      const cardsToAdd = 8 - extraCards;
+      const cardsToRemove = extraCards;
+
+      const handleCheckout = () => {
+        if (extraCards > 0) {
+          const message = `Your order is not in multiples of 8. You can:\n\n` +
+            `1. Add ${cardsToAdd} more card${cardsToAdd !== 1 ? 's' : ''} to get the tier pricing\n` +
+            `2. Remove ${cardsToRemove} card${cardsToRemove !== 1 ? 's' : ''} to get the tier pricing\n` +
+            `3. Continue with current order (extra cards will be charged at $0.50 each)`;
+          
+          if (confirm(message)) {
+            onCheckout();
+          }
+        } else {
+          onCheckout();
+        }
+      };
+
+      return (
+        <button
+          className="w-full bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400 mt-2"
+          onClick={handleCheckout}
+          disabled={order.length === 0}
+          aria-disabled={order.length === 0}
+        >
+          Checkout
+        </button>
+      );
+    }
+
+    // AddOns Component
+    function AddOns({ selectedAddOns, onToggleAddOn }) {
+      const addOns = [
+        { id: 'mystery', name: 'Mystery Proxy', price: 0.10 },
+        { id: 'booster', name: 'Proxy Booster Pack', price: 10.00 },
+        { id: 'sleeves', name: 'Card Sleeves', price: 5.00 },
+        { id: 'box', name: 'Card Box', price: 8.00 }
+      ];
+
+      return (
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-4">Add-ons</h3>
+          <div className="space-y-2">
+            {addOns.map(addOn => (
+              <label key={addOn.id} className="flex items-center justify-between p-2 border rounded hover:bg-gray-50">
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={selectedAddOns.includes(addOn.id)}
+                    onChange={() => onToggleAddOn(addOn.id)}
+                    className="mr-2"
+                  />
+                  <span>{addOn.name}</span>
+                </div>
+                <span className="text-gray-600">${addOn.price.toFixed(2)}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ReviewOrder Component
+    function ReviewOrder({ order, addOns, shipping, onClose, onConfirm }) {
+      const totalCards = order.length;
+      const basePrice = 0.50; // Tier 1 pricing
+      const cardsInTier = Math.floor(totalCards / 8) * 8;
+      const extraCards = totalCards % 8;
+      
+      const tierPrice = window.ProxyOrderSystem.calculatePrice(cardsInTier);
+      const extraPrice = extraCards * basePrice;
+      
+      const subtotal = (cardsInTier * tierPrice) + extraPrice;
+      const shippingCost = shipping === 'ship' ? 5.00 : 0.00;
+      const addOnsTotal = addOns.reduce((sum, id) => {
+        const addOn = addOns.find(a => a.id === id);
+        return sum + (addOn ? addOn.price : 0);
+      }, 0);
+      const total = subtotal + shippingCost + addOnsTotal;
+
+      return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">Review Order</h2>
+              <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+                ×
+              </button>
+            </div>
+
+            <AddOns selectedAddOns={addOns} onToggleAddOn={() => {}} />
+
+            <div className="border-t pt-4">
+              <table className="w-full">
+                <thead>
+                  <tr className="text-left">
+                    <th className="pb-2">Product</th>
+                    <th className="pb-2">Price</th>
+                    <th className="pb-2">Quantity</th>
+                    <th className="pb-2 text-right">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cardsInTier > 0 && (
+                    <tr>
+                      <td>Custom Playing Card (Tier)</td>
+                      <td>${tierPrice.toFixed(2)}</td>
+                      <td>{cardsInTier}</td>
+                      <td className="text-right">${(cardsInTier * tierPrice).toFixed(2)}</td>
+                    </tr>
+                  )}
+                  {extraCards > 0 && (
+                    <tr className="text-amber-600">
+                      <td>Custom Playing Card (Extra)</td>
+                      <td>${basePrice.toFixed(2)}</td>
+                      <td>{extraCards}</td>
+                      <td className="text-right">${extraPrice.toFixed(2)}</td>
+                    </tr>
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t">
+                    <td colSpan="3" className="pt-2">Shipping ({shipping === 'ship' ? 'Ship' : 'Local Pickup'})</td>
+                    <td className="text-right pt-2">${shippingCost.toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td colSpan="3" className="pt-2 font-bold">Total</td>
+                    <td className="text-right pt-2 font-bold">${total.toFixed(2)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-4">
+              <button
+                onClick={onClose}
+                className="px-4 py-2 border rounded hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onConfirm}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Confirm Order
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Main App
+    function App() {
+      const [order, setOrder] = useState(loadOrder());
+      const [previewCard, setPreviewCard] = useState(null);
+      const [selectedBack, setSelectedBack] = useState('000');
+      const [laminate, setLaminate] = useState('glossy');
+      const [shipping, setShipping] = useState('local');
+      const [showReview, setShowReview] = useState(false);
+      const [selectedAddOns, setSelectedAddOns] = useState([]);
+
+      // Hardcoded card back options
+      const backOptions = Array.from({ length: 14 }, (_, i) => {
+        const num = i.toString().padStart(3, '0');
+        return {
+          name: `Back ${num}`,
+          value: num,
+          img: `images/backs/${num}.png`,
+        };
+      });
+
+      // Persist order to localStorage
+      useEffect(() => {
+        saveOrder(order);
+      }, [order]);
+
+      // Add card to order (always add as new entry)
+      const handleAddToOrder = (card) => {
+        setOrder(prev => [
+          ...prev,
+          {
+            id: card.id,
+            name: card.name,
+            set: card.set,
+            set_name: card.set_name,
+            type_line: card.type_line,
+            image_uris: card.image_uris,
+            card_faces: card.card_faces,
+            collector_number: card.collector_number,
+          },
+        ]);
+      };
+
+      // Preview card
+      const handlePreview = (card) => setPreviewCard(card);
+      const handleClosePreview = () => setPreviewCard(null);
+
+      // Remove all cards
+      const handleClearAll = () => setOrder([]);
+
+      // Replace card version in order
+      const handleReplaceCardVersion = (oldItem, newItem) => {
+        setOrder(prev => prev.map(i =>
+          i === oldItem ? { ...newItem } : i
+        ));
+      };
+
+      // Remove card
+      const handleRemove = (item) => {
+        setOrder(prev => prev.filter(i => i !== item));
+      };
+
+      // Handle checkout
+      const handleCheckout = () => {
+        setShowReview(true);
+      };
+
+      // Handle order confirmation
+      const handleConfirmOrder = () => {
+        // TODO: Implement order submission
+        alert('Order submitted successfully!');
+        setShowReview(false);
+        setOrder([]);
+      };
+
+      // Toggle add-on
+      const handleToggleAddOn = (addOnId) => {
+        setSelectedAddOns(prev => 
+          prev.includes(addOnId)
+            ? prev.filter(id => id !== addOnId)
+            : [...prev, addOnId]
+        );
+      };
+
+      return (
+        <main className="container mx-auto p-4 max-w-5xl">
+          <header className="mb-6">
+            <h1 className="text-3xl font-bold text-center mb-2">Proxy Order Intake</h1>
+            <p className="text-center text-gray-600">Order custom Magic: The Gathering proxies. Powered by Scryfall.</p>
+          </header>
+          <div className="flex flex-col md:flex-row gap-8">
+            {/* Search/Bulk Add Container */}
+            <div className="md:w-1/2 bg-white rounded-lg shadow p-6 mb-4 md:mb-0">
+              <section className="mb-6">
+                <h2 className="text-lg font-semibold mb-4">Add Cards</h2>
+                <CardSearch onAdd={handleAddToOrder} onPreview={handlePreview} />
+              </section>
+            </div>
+            {/* Card Backs Container */}
+            <div className="md:w-1/2 bg-white rounded-lg shadow p-6 flex flex-col h-full">
+              <CardBackSelector
+                backOptions={backOptions}
+                selected={selectedBack}
+                onChange={setSelectedBack}
+              />
+            </div>
+          </div>
+          {/* Add spacing before order list */}
+          <div className="my-10"></div>
+          {/* Order List Container */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <OrderList order={order} onUpdateQty={handleAddToOrder} onRemove={handleRemove} onPreview={handlePreview} onClearAll={handleClearAll} onReplaceCardVersion={handleReplaceCardVersion} />
+          </div>
+          {/* Pricing and Options containers side by side */}
+          <div className="flex flex-col md:flex-row gap-8 mt-8">
+            {/* Options container */}
+            <div className="md:w-1/2 bg-white rounded-lg shadow p-6 flex flex-col mb-4 md:mb-0">
+              <h2 className="text-lg font-semibold mb-4">Options</h2>
+              <div className="flex gap-4">
+                <LaminateSelector value={laminate} onChange={setLaminate} />
+                <ShippingSelector value={shipping} onChange={setShipping} />
+              </div>
+            </div>
+            {/* Pricing Summary container */}
+            <div className="md:w-1/2 bg-white rounded-lg shadow p-6 flex flex-col items-center">
+              <PricingSummary order={order} shipping={shipping} />
+              <CheckoutButton order={order} onCheckout={handleCheckout} />
+            </div>
+          </div>
+          {previewCard && <CardPreview card={previewCard} onClose={handleClosePreview} />}
+          {showReview && (
+            <ReviewOrder
+              order={order}
+              addOns={selectedAddOns}
+              shipping={shipping}
+              onClose={() => setShowReview(false)}
+              onConfirm={handleConfirmOrder}
+            />
+          )}
+          <ReturnToTop />
+          <footer className="mt-10 text-center text-xs text-gray-400">
+            &copy; {new Date().getFullYear()} Proxy Order Intake. Not affiliated with Wizards of the Coast. Card data & images &copy; Scryfall.
+          </footer>
+        </main>
+      );
+    }
+
+    // Wrap the entire app in the error boundary
+    const AppWithErrorBoundary = () => (
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    );
+
+    // Render the app
+    ReactDOM.render(
+      <AppWithErrorBoundary />,
+      document.getElementById('root')
+    );
+  </script>
+</body>
+</html> 
