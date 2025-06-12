@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proxy Order Intake</title>
+  <!-- Development versions of React -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+  <script src="/js/shared.js"></script>
+  <style>
+    /* Add some basic styles to ensure the root div is visible */
+    #root {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div id="root"></div>
+  <script type="text/babel">
+    // Add error boundary
+    class ErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+      }
+
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+
+      componentDidCatch(error, errorInfo) {
+        console.error('Error:', error);
+        console.error('Error Info:', errorInfo);
+      }
+
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="p-4 bg-red-50 text-red-700 rounded-lg">
+              <h2 className="text-lg font-bold mb-2">Something went wrong</h2>
+              <p>{this.state.error?.toString()}</p>
+            </div>
+          );
+        }
+
+        return this.props.children;
+      }
+    }
+
+    const { useState, useEffect, useRef } = React;
+    const { debounce, loadOrder, saveOrder, calculatePrice } = window.ProxyOrderSystem;
+
+    // CardSearch Component
+    function CardSearch({ onAdd, onPreview }) {
+      const [searchTerm, setSearchTerm] = useState('');
+      const [suggestions, setSuggestions] = useState([]);
+      const [results, setResults] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState(null);
+      const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
+      const [bulkInput, setBulkInput] = useState('');
+      const inputRef = useRef();
+      const suggestionListRef = useRef();
+
+      // Combined Add Cards handler
+      const handleAddCards = async () => {
+        setLoading(true);
+        setError(null);
+        let added = false;
+        // Add from search box
+        if (searchTerm.trim()) {
+          try {
+            await new Promise((r) => setTimeout(r, 120));
+            const res = await axios.get(`https://api.scryfall.com/cards/search?q=${encodeURIComponent(searchTerm)}`);
+            if (res.data.data && res.data.data.length > 0) {
+              onAdd(res.data.data[0]);
+              added = true;
+            }
+          } catch (e) {
+            setError('Error fetching card from search.');
+          }
+        }
+        // Add from bulk input
+        if (bulkInput.trim()) {
+          const lines = bulkInput.split('\n').map(line => line.trim()).filter(Boolean);
+          try {
+            for (const line of lines) {
+              const match = line.match(/^\d*\s*([^(]+?)(?:\s*\(([^)]+)\)(?:\s+(\d+))?)?$/);
+              if (match) {
+                const [_, cardName, setCode, collectorNumber] = match;
+                const searchQuery = cardName.trim();
+                await new Promise(r => setTimeout(r, 120));
+                const res = await axios.get(`https://api.scryfall.com/cards/search?q=${encodeURIComponent(searchQuery)}`);
+                if (res.data.data && res.data.data.length > 0) {
+                  let card = res.data.data[0];
+                  if (setCode) {
+                    const exactMatch = res.data.data.find(c => 
+                      c.set.toLowerCase() === setCode.toLowerCase() || 
+                      c.set_name.toLowerCase().includes(setCode.toLowerCase())
+                    );
+                    if (exactMatch) card = exactMatch;
+                  }
+                  onAdd(card);
+                  added = true;
+                }
+              }
+            }
+            setBulkInput('');
+          } catch (e) {
+            setError('Error processing bulk input.');
+          }
+        }
+        if (added) setSearchTerm('');
+        setLoading(false);
+      };
+
+      // Add card by exact name
+      const addCardByExactName = async (name) => {
+        setLoading(true);
+        setError(null);
+        try {
+          const res = await axios.get(`https://api.scryfall.com/cards/named?exact=${encodeURIComponent(name)}`);
+          if (res.data) {
+            onAdd(res.data);
+            setSearchTerm('');
+            setSuggestions([]);
+          }
+        } catch (e) {
+          setError('Error fetching card.');
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      // Debounced autocomplete
+      const fetchSuggestions = debounce(async (term) => {
+        if (!term) return setSuggestions([]);
+        try {
+          const res = await axios.get(`https://api.scryfall.com/cards/autocomplete?q=${encodeURIComponent(term)}`);
+          setSuggestions(res.data.data || []);
+        } catch {
+          setSuggestions([]);
+        }
+      }, 200);
+
+      useEffect(() => {
+        fetchSuggestions(searchTerm);
+      }, [searchTerm]);
+
+      // Keyboard navigation for suggestions
+      const handleKeyDown = (e) => {
+        if (suggestions.length === 0) return;
+        if (e.key === 'ArrowDown') {
+          setSelectedSuggestion((prev) => Math.min(prev + 1, suggestions.length - 1));
+        } else if (e.key === 'ArrowUp') {
+          setSelectedSuggestion((prev) => Math.max(prev - 1, 0));
+        } else if (e.key === 'Enter') {
+          if (selectedSuggestion >= 0) {
+            addCardByExactName(suggestions[selectedSuggestion]);
+          }
+        }
+      };
+
+      return (
+        <section aria-labelledby="card-search-heading" className="mb-6">
+          <h2 id="card-search-heading" className="sr-only">Card Search</h2>
+
+          {/* Search for a Magic card */}
+          <label htmlFor="card-search" className="block text-sm font-medium text-gray-700 mb-1">Search for a Magic card</label>
+          <div className="relative mb-6">
+            <input
+              id="card-search"
+              ref={inputRef}
+              type="text"
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+              placeholder="Start typing a card name..."
+              value={searchTerm}
+              onChange={e => {
+                setSearchTerm(e.target.value);
+                setSelectedSuggestion(-1);
+              }}
+              onKeyDown={handleKeyDown}
+              aria-autocomplete="list"
+              aria-controls="card-suggestions"
+              aria-activedescendant={selectedSuggestion >= 0 ? `suggestion-${selectedSuggestion}` : undefined}
+              autoComplete="off"
+            />
+            {suggestions.length > 0 && (
+              <ul
+                id="card-suggestions"
+                ref={suggestionListRef}
+                className="absolute z-10 bg-white border w-full mt-1 rounded shadow max-h-48 overflow-auto"
+                role="listbox"
+              >
+                {suggestions.map((s, i) => (
+                  <li
+                    key={s}
+                    id={`suggestion-${i}`}
+                    className={`px-3 py-1 cursor-pointer ${i === selectedSuggestion ? 'bg-blue-100' : ''}`}
+                    role="option"
+                    aria-selected={i === selectedSuggestion}
+                    tabIndex={-1}
+                    onMouseDown={() => {
+                      addCardByExactName(s);
+                    }}
+                  >
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Bulk Input Section */}
+          <div className="mb-6">
+            <label htmlFor="bulk-input" className="block text-sm font-medium text-gray-700 mb-1">
+              Bulk Add Cards
+            </label>
+            <textarea
+              id="bulk-input"
+              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400 h-32"
+              placeholder="Paste card names here, one per line. Format: 1 Card Name (set) 123"
+              value={bulkInput}
+              onChange={e => setBulkInput(e.target.value)}
+            />
+          </div>
+
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            onClick={handleAddCards}
+            disabled={loading}
+          >
+            Add Cards
+          </button>
+          {loading && <p className="mt-2 text-blue-600">Loading...</p>}
+          {error && <p className="mt-2 text-red-600">{error}</p>}
+        </section>
+      );
+    }
+
+    // PricingConfig Component
+    function PricingConfig({ config, onSave }) {
+      const [basePrice, setBasePrice] = useState(config.basePrice);
+      const [shippingRate, setShippingRate] = useState(config.shippingRate);
+      const [discounts, setDiscounts] = useState(config.discounts);
+
+      const handleSave = () => {
+        onSave({
+          basePrice: parseFloat(basePrice),
+          shippingRate: parseFloat(shippingRate),
+          discounts: discounts.map(d => ({
+            min: parseInt(d.min),
+            percent: parseFloat(d.percent)
+          }))
+        });
+      };
+
+      return (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-xl font-bold mb-4">Pricing Configuration</h2>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Base Price ($)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={basePrice}
+                onChange={e => setBasePrice(e.target.value)}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Shipping Rate ($)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={shippingRate}
+                onChange={e => setShippingRate(e.target.value)}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Volume Discounts</label>
+              {discounts.map((discount, index) => (
+                <div key={index} className="flex gap-4 mb-2">
+                  <input
+                    type="number"
+                    value={discount.min}
+                    onChange={e => {
+                      const newDiscounts = [...discounts];
+                      newDiscounts[index].min = e.target.value;
+                      setDiscounts(newDiscounts);
+                    }}
+                    placeholder="Min quantity"
+                    className="block w-1/2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={discount.percent}
+                    onChange={e => {
+                      const newDiscounts = [...discounts];
+                      newDiscounts[index].percent = e.target.value;
+                      setDiscounts(newDiscounts);
+                    }}
+                    placeholder="Discount %"
+                    className="block w-1/2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  />
+                </div>
+              ))}
+              <button
+                onClick={() => setDiscounts([...discounts, { min: '', percent: '' }])}
+                className="mt-2 text-sm text-blue-600 hover:text-blue-800"
+              >
+                Add Discount Tier
+              </button>
+            </div>
+            <button
+              onClick={handleSave}
+              className="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              Save Pricing
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // OrderList Component
+    function OrderList({ orders, onUpdateStatus }) {
+      return (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-xl font-bold mb-4">Recent Orders</h2>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead>
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order ID</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {orders.map(order => (
+                  <tr key={order.id}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.id}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(order.date).toLocaleDateString()}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{order.items.length} cards</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${order.total.toFixed(2)}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <select
+                        value={order.status}
+                        onChange={e => onUpdateStatus(order.id, e.target.value)}
+                        className="text-sm rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="processing">Processing</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <button className="text-blue-600 hover:text-blue-800">View Details</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // FileUpload Component
+    function FileUpload({ onUpload }) {
+      const [file, setFile] = useState(null);
+      const [uploading, setUploading] = useState(false);
+
+      const handleUpload = async () => {
+        if (!file) return;
+        setUploading(true);
+        try {
+          // TODO: Implement file upload
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          onUpload(file);
+          setFile(null);
+        } catch (error) {
+          console.error('Upload failed:', error);
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      return (
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-xl font-bold mb-4">Upload Card Backs</h2>
+          <div className="space-y-4">
+            <div className="flex items-center justify-center w-full">
+              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100">
+                <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                  <svg className="w-8 h-8 mb-4 text-gray-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
+                    <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
+                  </svg>
+                  <p className="mb-2 text-sm text-gray-500">
+                    <span className="font-semibold">Click to upload</span> or drag and drop
+                  </p>
+                  <p className="text-xs text-gray-500">PNG or JPG (MAX. 800x600px)</p>
+                </div>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={e => setFile(e.target.files[0])}
+                />
+              </label>
+            </div>
+            {file && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">{file.name}</span>
+                <button
+                  onClick={handleUpload}
+                  disabled={uploading}
+                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50"
+                >
+                  {uploading ? 'Uploading...' : 'Upload'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Main App Component
+    function App() {
+      const [activeTab, setActiveTab] = useState('orders');
+      const [pricingConfig, setPricingConfig] = useState({
+        basePrice: 0.50,
+        shippingRate: 5.00,
+        discounts: [
+          { min: 51, percent: 0.10 },
+          { min: 10, percent: 0.05 }
+        ]
+      });
+      const [orders, setOrders] = useState([]);
+
+      // Load orders from localStorage
+      useEffect(() => {
+        const savedOrders = localStorage.getItem('admin_orders');
+        if (savedOrders) {
+          setOrders(JSON.parse(savedOrders));
+        }
+      }, []);
+
+      // Save orders to localStorage
+      useEffect(() => {
+        localStorage.setItem('admin_orders', JSON.stringify(orders));
+      }, [orders]);
+
+      const handleUpdateStatus = (orderId, newStatus) => {
+        setOrders(prev => prev.map(order =>
+          order.id === orderId ? { ...order, status: newStatus } : order
+        ));
+      };
+
+      const handleSavePricing = (newConfig) => {
+        setPricingConfig(newConfig);
+        // TODO: Save to backend
+      };
+
+      const handleFileUpload = (file) => {
+        // TODO: Implement file upload to backend
+        console.log('File uploaded:', file.name);
+      };
+
+      return (
+        <main className="container mx-auto p-4 max-w-7xl">
+          <header className="mb-6">
+            <h1 className="text-3xl font-bold text-center mb-2">Admin Panel</h1>
+            <p className="text-center text-gray-600">Manage orders, pricing, and card backs</p>
+          </header>
+
+          <div className="mb-6">
+            <nav className="flex space-x-4">
+              <button
+                onClick={() => setActiveTab('orders')}
+                className={`px-4 py-2 rounded ${
+                  activeTab === 'orders'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Orders
+              </button>
+              <button
+                onClick={() => setActiveTab('pricing')}
+                className={`px-4 py-2 rounded ${
+                  activeTab === 'pricing'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Pricing
+              </button>
+              <button
+                onClick={() => setActiveTab('uploads')}
+                className={`px-4 py-2 rounded ${
+                  activeTab === 'uploads'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                Uploads
+              </button>
+            </nav>
+          </div>
+
+          <div className="space-y-6">
+            {activeTab === 'orders' && (
+              <OrderList orders={orders} onUpdateStatus={handleUpdateStatus} />
+            )}
+            {activeTab === 'pricing' && (
+              <PricingConfig config={pricingConfig} onSave={handleSavePricing} />
+            )}
+            {activeTab === 'uploads' && (
+              <FileUpload onUpload={handleFileUpload} />
+            )}
+          </div>
+        </main>
+      );
+    }
+
+    // Wrap the entire app in the error boundary
+    const AppWithErrorBoundary = () => (
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    );
+
+    // Render the app
+    ReactDOM.render(
+      <AppWithErrorBoundary />,
+      document.getElementById('root')
+    );
+  </script>
+</body>
+</html>
