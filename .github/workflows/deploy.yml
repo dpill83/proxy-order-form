@@ -21,7 +21,7 @@ jobs:
         
       - name: Build
         run: |
-          # Copy public directory to dist
+          mkdir -p dist # Create the dist directory
           cp -r public/* dist/
           
       - name: Deploy to GitHub Pages
