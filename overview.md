@@ -19,15 +19,71 @@ The Proxy Order Intake System is a web application designed to facilitate the or
 
 ## Technical Details
 - **Frontend**: React, Tailwind CSS, Axios for API requests.
-- **Backend**: Node.js with Express for serving static files and handling API requests.
-- **Data Storage**: Local storage for order persistence.
+- **Backend**: (Planned) Node.js with Express, MongoDB for data persistence, JWT for authentication, Multer for file uploads, Winston for logging, Socket.IO for real-time updates.
+- **Data Storage**: Currently uses browser's `localStorage` for order persistence. Backend integration is planned for future versions.
+
+## Deployment Status
+- **Local Development (Frontend)**: Open `index.html` directly in your browser from the project root.
+- **Local Development (Backend - currently unused by frontend)**: Run `npm run dev` (requires MongoDB setup and .env file).
+- **Public Deployment**: Hosted on GitHub Pages via the `main` branch, serving content from the repository root. Accessible at `https://dpill83.github.io/proxy-order-form/`.
+
+## File Structure (Current)
+```
+/
+├── index.html          # Main order form interface
+├── admin.html          # Admin panel interface
+├── js/
+│   ├── shared.js       # Shared utilities
+│   └── admin.js        # Admin-specific JS (if exists)
+├── css/
+├── images/
+│   └── backs/          # Card back images
+├── .nojekyll           # Disables Jekyll processing for GitHub Pages
+├── package.json        # Node.js dependencies and scripts
+├── server.js           # Node.js Express server (backend - currently unused by frontend)
+├── src/                # Backend source code (planned for future integration)
+│   ├── config/
+│   ├── controllers/
+│   ├── middleware/
+│   ├── models/
+│   ├── routes/
+│   ├── utils/
+│   └── uploads/
+├── README.md           # Project README
+├── overview.md         # This file
+└── ...other files...
+```
+
+## Development Workflow
+1. Install backend dependencies: `npm install` (if planning to run the backend).
+2. For frontend development (local): Open `index.html` or `admin.html` directly in your web browser.
+3. For backend development (local): Run `npm run dev` (requires a `.env` file and local MongoDB instance).
+
+## Future Improvements
+- **Backend Integration**: Implement full backend functionality for order management, pricing, file uploads, and user authentication using Node.js, Express, and MongoDB (as per initial plan).
+- **User Authentication**: Implement secure access to the admin panel.
+- **Order Management**: Transition from `localStorage` to a database for real-time updates and improved UI.
+- **Pricing Configuration**: Implement dynamic pricing logic within the backend.
+- **File Uploads**: Integrate the backend solution for managing card back images.
+- **Error Handling**: Enhance error handling and logging in the backend.
+- **User Interface**: General UI/UX improvements based on testing.
+- **Payment Integration**: Add a payment gateway for orders.
 
 ## File Structure
-- `public/`: Contains static assets and HTML files.
-  - `index.html`: Main order form interface.
-  - `admin.html`: Admin panel interface.
-  - `js/`: JavaScript files for shared utilities and components.
-  - `images/`: Card back images and other assets.
+```
+/
+├── public/
+│   ├── index.html      # Main order form
+│   ├── admin.html      # Admin panel
+│   ├── js/
+│   │   └── shared.js   # Shared utilities
+│   ├── css/
+│   └── images/
+│       └── backs/      # Card back images
+├── server.js           # Express server
+├── package.json        # Dependencies
+└── overview.md         # This file
+```
 
 ## Development and Production
 - **Development**: Run `npm run dev` to start the development server.
