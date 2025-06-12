@@ -23,6 +23,7 @@ jobs:
         run: |
           mkdir -p dist # Create the dist directory
           cp -r public/* dist/
+          touch dist/.nojekyll # Add .nojekyll to disable Jekyll processing
           
       - name: Deploy to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
