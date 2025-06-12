@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>View Order</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div class="container mx-auto p-4 max-w-4xl">
+    <header class="mb-6">
+      <h1 class="text-3xl font-bold text-center mb-2">Order Details</h1>
+      <p class="text-center text-gray-600">View your order information</p>
+    </header>
+
+    <div id="order-details" class="bg-white rounded-lg shadow p-6">
+      <!-- Order details will be populated here -->
+    </div>
+  </div>
+
+  <script>
+    // Function to get URL parameters
+    function getUrlParameter(name) {
+      name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
+      const regex = new RegExp('[\\?&]' + name + '=([^&#]*)');
+      const results = regex.exec(location.search);
+      return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
+    }
+
+    // Function to format currency
+    function formatCurrency(amount) {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD'
+      }).format(amount);
+    }
+
+    // Function to calculate order total
+    function calculateOrderTotal(order) {
+      const config = JSON.parse(localStorage.getItem('pricingConfig') || '{}');
+      const basePrice = config.basePrice || 0.50;
+      const cardCount = order.cards.split('\n').length;
+      const cardsInTier = Math.floor(cardCount / 8) * 8;
+      const extraCards = cardCount % 8;
+      
+      const tierPrice = basePrice * (1 - (config.volumeDiscounts?.find(d => d.min <= cardsInTier)?.percent || 0));
+      const extraPrice = extraCards * basePrice;
+      
+      const subtotal = (cardsInTier * tierPrice) + extraPrice;
+      const shippingCost = order.shipping === 'ship' ? (config.shipping?.shipping?.price || 5.00) : 0;
+      
+      return subtotal + shippingCost;
+    }
+
+    // Load and display order
+    function loadOrder() {
+      const orderId = getUrlParameter('id');
+      if (!orderId) {
+        document.getElementById('order-details').innerHTML = `
+          <div class="text-center text-red-500">
+            <p>No order ID provided.</p>
+            <a href="index.html" class="text-blue-500 hover:text-blue-700">Return to Home</a>
+          </div>
+        `;
+        return;
+      }
+
+      const orders = JSON.parse(localStorage.getItem('adminOrders') || '[]');
+      const order = orders.find(o => o.id === orderId);
+
+      if (!order) {
+        document.getElementById('order-details').innerHTML = `
+          <div class="text-center text-red-500">
+            <p>Order not found.</p>
+            <a href="index.html" class="text-blue-500 hover:text-blue-700">Return to Home</a>
+          </div>
+        `;
+        return;
+      }
+
+      const total = calculateOrderTotal(order);
+      const addOnsList = {
+        mystery: 'Mystery Proxy',
+        booster: 'Proxy Booster Pack',
+        sleeves: 'Card Sleeves',
+        box: 'Card Box'
+      };
+
+      document.getElementById('order-details').innerHTML = `
+        <div class="space-y-6">
+          <div class="flex justify-between items-start">
+            <div>
+              <h2 class="text-xl font-bold">Order #${order.id}</h2>
+              <p class="text-sm text-gray-500">${new Date(order.timestamp).toLocaleString()}</p>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="copyCardList()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                Copy Card List
+              </button>
+              <a href="index.html" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
+                Return Home
+              </a>
+            </div>
+          </div>
+
+          <div class="border-t pt-4">
+            <h3 class="font-semibold mb-2">Card List:</h3>
+            <pre class="bg-gray-50 p-4 rounded whitespace-pre-wrap">${order.cards}</pre>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 border-t pt-4">
+            <div>
+              <h3 class="font-semibold mb-2">Add-ons:</h3>
+              <ul class="list-disc list-inside">
+                ${order.addOns.map(id => `<li>${addOnsList[id]}</li>`).join('')}
+              </ul>
+            </div>
+            <div>
+              <h3 class="font-semibold mb-2">Shipping:</h3>
+              <p>${order.shipping === 'ship' ? 'Ship ($5.00)' : 'Local Pickup (Free)'}</p>
+            </div>
+          </div>
+
+          <div class="border-t pt-4">
+            <div class="flex justify-between items-center">
+              <h3 class="font-semibold">Total:</h3>
+              <p class="text-xl font-bold">${formatCurrency(total)}</p>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Function to copy card list
+    function copyCardList() {
+      const orderId = getUrlParameter('id');
+      const orders = JSON.parse(localStorage.getItem('adminOrders') || '[]');
+      const order = orders.find(o => o.id === orderId);
+      
+      if (order) {
+        navigator.clipboard.writeText(order.cards)
+          .then(() => alert('Card list copied to clipboard!'))
+          .catch(err => console.error('Failed to copy:', err));
+      }
+    }
+
+    // Load order when page loads
+    document.addEventListener('DOMContentLoaded', loadOrder);
+  </script>
+</body>
+</html> 

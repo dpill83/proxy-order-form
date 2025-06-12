@@ -1,6 +1,5 @@
-// Storage keys
-const ORDER_STORAGE_KEY = 'proxy_order_intake_order';
-const CONFIG_STORAGE_KEY = 'proxy_order_intake_config';
+// Create namespace if it doesn't exist
+window.ProxyOrderSystem = window.ProxyOrderSystem || {};
 
 // Utility: debounce
 function debounce(fn, delay) {
@@ -11,43 +10,65 @@ function debounce(fn, delay) {
   };
 }
 
+// Calculate price based on quantity and configuration
+function calculatePrice(quantity) {
+  const config = window.ProxyOrderSystem.ConfigStorage?.load() || {
+    basePrice: 0.50,
+    volumeDiscounts: [
+      { min: 8, percent: 0.10 },
+      { min: 16, percent: 0.15 },
+      { min: 24, percent: 0.20 }
+    ]
+  };
+  const basePrice = config.basePrice;
+  
+  // Find applicable discount
+  const discount = config.volumeDiscounts.find(d => quantity >= d.min);
+  const discountPercent = discount ? discount.percent : 0;
+
+  // Calculate final price
+  return basePrice * (1 - discountPercent);
+}
+
+// Calculate shipping price
+function calculateShippingPrice(shippingMethod) {
+  const config = window.ProxyOrderSystem.ConfigStorage?.load() || {
+    shippingOptions: {
+      local: { price: 0 },
+      ship: { price: 5.00 }
+    }
+  };
+  return config.shippingOptions[shippingMethod]?.price || 0;
+}
+
 // Load order from localStorage
 function loadOrder() {
   try {
-    const data = localStorage.getItem(ORDER_STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
-  } catch {
+    const savedOrder = localStorage.getItem('proxyOrder');
+    return savedOrder ? JSON.parse(savedOrder) : [];
+  } catch (e) {
+    console.error('Error loading order:', e);
     return [];
   }
 }
 
 // Save order to localStorage
 function saveOrder(order) {
-  localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(order));
-}
-
-// Calculate price based on quantity
-function calculatePrice(quantity) {
-  const BASE_PRICE = 0.50;
-  const DISCOUNTS = [
-    { min: 51, percent: 0.10 },
-    { min: 10, percent: 0.05 },
-  ];
-
-  // Find applicable discount
-  const discount = DISCOUNTS.find(d => quantity >= d.min);
-  const discountPercent = discount ? discount.percent : 0;
-
-  // Calculate final price
-  return BASE_PRICE * (1 - discountPercent);
+  try {
+    localStorage.setItem('proxyOrder', JSON.stringify(order));
+  } catch (e) {
+    console.error('Error saving order:', e);
+  }
 }
 
 // Export utilities to global object
-window.ProxyOrderSystem = {
+Object.assign(window.ProxyOrderSystem, {
   debounce,
-  loadOrder,
-  saveOrder,
   calculatePrice,
-  ORDER_STORAGE_KEY,
-  CONFIG_STORAGE_KEY
-}; 
+  calculateShippingPrice,
+  loadOrder,
+  saveOrder
+});
+
+// Dispatch event when ProxyOrderSystem is ready
+document.dispatchEvent(new Event('ProxyOrderSystemReady')); 

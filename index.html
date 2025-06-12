@@ -4,11 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MTG Proxy Order Form</title>
-  <!-- <base href="/proxy-order-form/"> REMOVED FOR 'Deploy from a branch' method -->
-  <!-- Cache Bust (final attempt): ${new Date().toISOString()} -->
   <!-- Development versions of React -->
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
@@ -25,7 +23,6 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <!-- <script>alert('Hello from GitHub Pages!');</script> TEMPORARILY REMOVED -->
   <div id="root"></div>
   <script type="text/babel">
     // Add error boundary
@@ -658,8 +655,63 @@
 
     // ReviewOrder Component
     function ReviewOrder({ order, addOns, shipping, onClose, onConfirm }) {
+      const [selectedAddOns, setSelectedAddOns] = useState(addOns);
+      const [isSubmitting, setIsSubmitting] = useState(false);
+      const [orderLink, setOrderLink] = useState(null);
+
+      const addOnsList = [
+        { id: 'mystery', name: 'Mystery Proxy', price: 0.10 },
+        { id: 'booster', name: 'Proxy Booster Pack', price: 10.00 },
+        { id: 'sleeves', name: 'Card Sleeves', price: 5.00 },
+        { id: 'box', name: 'Card Box', price: 8.00 }
+      ];
+
+      const handleToggleAddOn = (addOnId) => {
+        setSelectedAddOns(prev => 
+          prev.includes(addOnId)
+            ? prev.filter(id => id !== addOnId)
+            : [...prev, addOnId]
+        );
+      };
+
+      const handleConfirm = () => {
+        setIsSubmitting(true);
+        try {
+          // Format the order into a card list - each card is quantity 1
+          const cardList = order.map(card => 
+            `1 ${card.name} (${card.set.toUpperCase()}) ${card.collector_number}`
+          ).join('\n');
+
+          // Create a unique order ID
+          const orderId = Math.random().toString(36).substring(2, 15);
+          
+          // Store the order in localStorage
+          const orderData = {
+            id: orderId,
+            cards: cardList,
+            addOns: selectedAddOns,
+            shipping,
+            timestamp: new Date().toISOString(),
+            status: 'Not Started' // Add default status
+          };
+
+          // Get existing orders or initialize empty array
+          const existingOrders = JSON.parse(localStorage.getItem('adminOrders') || '[]');
+          existingOrders.push(orderData);
+          localStorage.setItem('adminOrders', JSON.stringify(existingOrders));
+
+          // Redirect to order view page
+          window.location.href = `/order-view.html?id=${orderId}`;
+        } catch (error) {
+          console.error('Error submitting order:', error);
+          alert('There was an error submitting your order. Please try again.');
+        } finally {
+          setIsSubmitting(false);
+        }
+      };
+
       const totalCards = order.length;
-      const basePrice = 0.50; // Tier 1 pricing
+      const basePrice = 0.50;
       const cardsInTier = Math.floor(totalCards / 8) * 8;
       const extraCards = totalCards % 8;
       
@@ -668,8 +720,8 @@
       
       const subtotal = (cardsInTier * tierPrice) + extraPrice;
       const shippingCost = shipping === 'ship' ? 5.00 : 0.00;
-      const addOnsTotal = addOns.reduce((sum, id) => {
-        const addOn = addOns.find(a => a.id === id);
+      const addOnsTotal = selectedAddOns.reduce((sum, id) => {
+        const addOn = addOnsList.find(a => a.id === id);
         return sum + (addOn ? addOn.price : 0);
       }, 0);
       const total = subtotal + shippingCost + addOnsTotal;
@@ -684,7 +736,25 @@
               </button>
             </div>
 
-            <AddOns selectedAddOns={addOns} onToggleAddOn={() => {}} />
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold mb-4">Add-ons</h3>
+              <div className="space-y-2">
+                {addOnsList.map(addOn => (
+                  <label key={addOn.id} className="flex items-center justify-between p-2 border rounded hover:bg-gray-50">
+                    <div className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedAddOns.includes(addOn.id)}
+                        onChange={() => handleToggleAddOn(addOn.id)}
+                        className="mr-2"
+                      />
+                      <span>{addOn.name}</span>
+                    </div>
+                    <span className="text-gray-600">${addOn.price.toFixed(2)}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
 
             <div className="border-t pt-4">
               <table className="w-full">
@@ -713,6 +783,17 @@
                       <td className="text-right">${extraPrice.toFixed(2)}</td>
                     </tr>
                   )}
+                  {selectedAddOns.map(id => {
+                    const addOn = addOnsList.find(a => a.id === id);
+                    return addOn ? (
+                      <tr key={id}>
+                        <td>{addOn.name}</td>
+                        <td>${addOn.price.toFixed(2)}</td>
+                        <td>1</td>
+                        <td className="text-right">${addOn.price.toFixed(2)}</td>
+                      </tr>
+                    ) : null;
+                  })}
                 </tbody>
                 <tfoot>
                   <tr className="border-t">
@@ -731,14 +812,16 @@
               <button
                 onClick={onClose}
                 className="px-4 py-2 border rounded hover:bg-gray-50"
+                disabled={isSubmitting}
               >
                 Cancel
               </button>
               <button
-                onClick={onConfirm}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                onClick={handleConfirm}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                disabled={isSubmitting}
               >
-                Confirm Order
+                {isSubmitting ? 'Submitting...' : 'Confirm Order'}
               </button>
             </div>
           </div>
@@ -831,9 +914,19 @@
 
       return (
         <main className="container mx-auto p-4 max-w-5xl">
-          <header className="mb-6">
-            <h1 className="text-3xl font-bold text-center mb-2">Proxy Order Intake</h1>
-            <p className="text-center text-gray-600">Order custom Magic: The Gathering proxies. Powered by Scryfall.</p>
+          <header className="bg-white shadow-sm">
+            <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+              <h1 class="text-2xl font-bold text-gray-900">Proxy Order Form</h1>
+              <div class="relative">
+                <button onclick="toggleMenu()" class="p-2 rounded-md hover:bg-gray-100">
+                  <i class="fas fa-bars text-gray-600"></i>
+                </button>
+                <div id="menu" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50">
+                  <a href="/order-view.html" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">View Orders</a>
+                  <a href="/admin.html" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Admin Panel</a>
+                </div>
+              </div>
+            </div>
           </header>
           <div className="flex flex-col md:flex-row gap-8">
             {/* Search/Bulk Add Container */}
@@ -900,10 +993,24 @@
     );
 
     // Render the app
-    ReactDOM.render(
-      <AppWithErrorBoundary />,
-      document.getElementById('root')
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(
+      <AppWithErrorBoundary />
     );
+  </script>
+  <script>
+    function toggleMenu() {
+      const menu = document.getElementById('menu');
+      menu.classList.toggle('hidden');
+    }
+
+    document.addEventListener('click', (event) => {
+      const menu = document.getElementById('menu');
+      const button = event.target.closest('button');
+      if (!button && !menu.contains(event.target)) {
+        menu.classList.add('hidden');
+      }
+    });
   </script>
 </body>
 </html> 

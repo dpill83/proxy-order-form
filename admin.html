@@ -3,557 +3,610 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Panel - MTG Proxy Order Form</title>
-  <link rel="stylesheet" href="./css/admin.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
-  <!-- Development versions of React -->
-  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <title>Proxy Order Admin</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
-  <script src="./js/admin.js"></script>
-  <script src="./js/shared.js"></script>
-  <style>
-    /* Add some basic styles to ensure the root div is visible */
-    #root {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-  </style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
 </head>
 <body class="bg-gray-50 min-h-screen">
-  <div id="root"></div>
-  <script type="text/babel">
-    // Add error boundary
-    class ErrorBoundary extends React.Component {
-      constructor(props) {
-        super(props);
-        this.state = { hasError: false, error: null };
-      }
+  <div class="container mx-auto p-4 max-w-5xl">
+    <header class="mb-6">
+      <h1 class="text-3xl font-bold text-center mb-2">Proxy Order Admin</h1>
+      <p class="text-center text-gray-600">Manage orders, pricing, and settings</p>
+    </header>
 
-      static getDerivedStateFromError(error) {
-        return { hasError: true, error };
-      }
+    <!-- Navigation Tabs -->
+    <div class="mb-6">
+      <nav class="flex space-x-4 border-b">
+        <button onclick="showTab('orders')" class="tab-button px-4 py-2 border-b-2 border-transparent hover:border-gray-300" data-tab="orders">
+          Orders
+        </button>
+        <button onclick="showTab('pricing')" class="tab-button px-4 py-2 border-b-2 border-transparent hover:border-gray-300" data-tab="pricing">
+          Pricing
+        </button>
+        <button onclick="showTab('bookkeeping')" class="tab-button px-4 py-2 border-b-2 border-transparent hover:border-gray-300" data-tab="bookkeeping">
+          Bookkeeping
+        </button>
+        <button onclick="showTab('cardbacks')" class="tab-button px-4 py-2 border-b-2 border-transparent hover:border-gray-300" data-tab="cardbacks">
+          Card Backs
+        </button>
+        <button onclick="showTab('customcards')" class="tab-button px-4 py-2 border-b-2 border-transparent hover:border-gray-300" data-tab="customcards">
+          Custom Cards
+        </button>
+      </nav>
+    </div>
 
-      componentDidCatch(error, errorInfo) {
-        console.error('Error:', error);
-        console.error('Error Info:', errorInfo);
-      }
+    <!-- Tab Content -->
+    <div id="tab-content">
+      <!-- Orders Tab -->
+      <div id="orders" class="tab-content">
+        <div id="orders-list" class="space-y-4">
+          <!-- Orders will be populated here -->
+        </div>
+      </div>
 
-      render() {
-        if (this.state.hasError) {
-          return (
-            <div className="p-4 bg-red-50 text-red-700 rounded-lg">
-              <h2 className="text-lg font-bold mb-2">Something went wrong</h2>
-              <p>{this.state.error?.toString()}</p>
+      <!-- Pricing Tab -->
+      <div id="pricing" class="tab-content hidden">
+        <div class="bg-white rounded-lg shadow p-6">
+          <h2 class="text-xl font-bold mb-4">Pricing Configuration</h2>
+          
+          <!-- Base Price -->
+          <div class="mb-6">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Base Price per Card</label>
+            <div class="flex items-center">
+              <span class="mr-2">$</span>
+              <input type="number" step="0.01" min="0" value="0.50" class="p-2 border rounded w-32" id="base-price">
             </div>
-          );
-        }
-
-        return this.props.children;
-      }
-    }
-
-    const { useState, useEffect, useRef } = React;
-    const { debounce, loadOrder, saveOrder, calculatePrice } = window.ProxyOrderSystem;
-
-    // CardSearch Component
-    function CardSearch({ onAdd, onPreview }) {
-      const [searchTerm, setSearchTerm] = useState('');
-      const [suggestions, setSuggestions] = useState([]);
-      const [results, setResults] = useState([]);
-      const [loading, setLoading] = useState(false);
-      const [error, setError] = useState(null);
-      const [selectedSuggestion, setSelectedSuggestion] = useState(-1);
-      const [bulkInput, setBulkInput] = useState('');
-      const inputRef = useRef();
-      const suggestionListRef = useRef();
-
-      // Combined Add Cards handler
-      const handleAddCards = async () => {
-        setLoading(true);
-        setError(null);
-        let added = false;
-        // Add from search box
-        if (searchTerm.trim()) {
-          try {
-            await new Promise((r) => setTimeout(r, 120));
-            const res = await axios.get(`https://api.scryfall.com/cards/search?q=${encodeURIComponent(searchTerm)}`);
-            if (res.data.data && res.data.data.length > 0) {
-              onAdd(res.data.data[0]);
-              added = true;
-            }
-          } catch (e) {
-            setError('Error fetching card from search.');
-          }
-        }
-        // Add from bulk input
-        if (bulkInput.trim()) {
-          const lines = bulkInput.split('\n').map(line => line.trim()).filter(Boolean);
-          try {
-            for (const line of lines) {
-              const match = line.match(/^\d*\s*([^(]+?)(?:\s*\(([^)]+)\)(?:\s+(\d+))?)?$/);
-              if (match) {
-                const [_, cardName, setCode, collectorNumber] = match;
-                const searchQuery = cardName.trim();
-                await new Promise(r => setTimeout(r, 120));
-                const res = await axios.get(`https://api.scryfall.com/cards/search?q=${encodeURIComponent(searchQuery)}`);
-                if (res.data.data && res.data.data.length > 0) {
-                  let card = res.data.data[0];
-                  if (setCode) {
-                    const exactMatch = res.data.data.find(c => 
-                      c.set.toLowerCase() === setCode.toLowerCase() || 
-                      c.set_name.toLowerCase().includes(setCode.toLowerCase())
-                    );
-                    if (exactMatch) card = exactMatch;
-                  }
-                  onAdd(card);
-                  added = true;
-                }
-              }
-            }
-            setBulkInput('');
-          } catch (e) {
-            setError('Error processing bulk input.');
-          }
-        }
-        if (added) setSearchTerm('');
-        setLoading(false);
-      };
-
-      // Add card by exact name
-      const addCardByExactName = async (name) => {
-        setLoading(true);
-        setError(null);
-        try {
-          const res = await axios.get(`https://api.scryfall.com/cards/named?exact=${encodeURIComponent(name)}`);
-          if (res.data) {
-            onAdd(res.data);
-            setSearchTerm('');
-            setSuggestions([]);
-          }
-        } catch (e) {
-          setError('Error fetching card.');
-        } finally {
-          setLoading(false);
-        }
-      };
-
-      // Debounced autocomplete
-      const fetchSuggestions = debounce(async (term) => {
-        if (!term) return setSuggestions([]);
-        try {
-          const res = await axios.get(`https://api.scryfall.com/cards/autocomplete?q=${encodeURIComponent(term)}`);
-          setSuggestions(res.data.data || []);
-        } catch {
-          setSuggestions([]);
-        }
-      }, 200);
-
-      useEffect(() => {
-        fetchSuggestions(searchTerm);
-      }, [searchTerm]);
-
-      // Keyboard navigation for suggestions
-      const handleKeyDown = (e) => {
-        if (suggestions.length === 0) return;
-        if (e.key === 'ArrowDown') {
-          setSelectedSuggestion((prev) => Math.min(prev + 1, suggestions.length - 1));
-        } else if (e.key === 'ArrowUp') {
-          setSelectedSuggestion((prev) => Math.max(prev - 1, 0));
-        } else if (e.key === 'Enter') {
-          if (selectedSuggestion >= 0) {
-            addCardByExactName(suggestions[selectedSuggestion]);
-          }
-        }
-      };
-
-      return (
-        <section aria-labelledby="card-search-heading" className="mb-6">
-          <h2 id="card-search-heading" className="sr-only">Card Search</h2>
-
-          {/* Search for a Magic card */}
-          <label htmlFor="card-search" className="block text-sm font-medium text-gray-700 mb-1">Search for a Magic card</label>
-          <div className="relative mb-6">
-            <input
-              id="card-search"
-              ref={inputRef}
-              type="text"
-              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
-              placeholder="Start typing a card name..."
-              value={searchTerm}
-              onChange={e => {
-                setSearchTerm(e.target.value);
-                setSelectedSuggestion(-1);
-              }}
-              onKeyDown={handleKeyDown}
-              aria-autocomplete="list"
-              aria-controls="card-suggestions"
-              aria-activedescendant={selectedSuggestion >= 0 ? `suggestion-${selectedSuggestion}` : undefined}
-              autoComplete="off"
-            />
-            {suggestions.length > 0 && (
-              <ul
-                id="card-suggestions"
-                ref={suggestionListRef}
-                className="absolute z-10 bg-white border w-full mt-1 rounded shadow max-h-48 overflow-auto"
-                role="listbox"
-              >
-                {suggestions.map((s, i) => (
-                  <li
-                    key={s}
-                    id={`suggestion-${i}`}
-                    className={`px-3 py-1 cursor-pointer ${i === selectedSuggestion ? 'bg-blue-100' : ''}`}
-                    role="option"
-                    aria-selected={i === selectedSuggestion}
-                    tabIndex={-1}
-                    onMouseDown={() => {
-                      addCardByExactName(s);
-                    }}
-                  >
-                    {s}
-                  </li>
-                ))}
-              </ul>
-            )}
           </div>
 
-          {/* Bulk Input Section */}
-          <div className="mb-6">
-            <label htmlFor="bulk-input" className="block text-sm font-medium text-gray-700 mb-1">
-              Bulk Add Cards
-            </label>
-            <textarea
-              id="bulk-input"
-              className="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400 h-32"
-              placeholder="Paste card names here, one per line. Format: 1 Card Name (set) 123"
-              value={bulkInput}
-              onChange={e => setBulkInput(e.target.value)}
-            />
+          <!-- Volume Discounts -->
+          <div class="mb-6">
+            <h3 class="text-lg font-semibold mb-4">Volume Discounts</h3>
+            <div id="discount-tiers" class="space-y-4">
+              <!-- Discount tiers will be populated here -->
+            </div>
+            <button onclick="addDiscountTier()" class="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+              Add Discount Tier
+            </button>
           </div>
 
-          <button
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            onClick={handleAddCards}
-            disabled={loading}
-          >
-            Add Cards
-          </button>
-          {loading && <p className="mt-2 text-blue-600">Loading...</p>}
-          {error && <p className="mt-2 text-red-600">{error}</p>}
-        </section>
-      );
-    }
-
-    // PricingConfig Component
-    function PricingConfig({ config, onSave }) {
-      const [basePrice, setBasePrice] = useState(config.basePrice);
-      const [shippingRate, setShippingRate] = useState(config.shippingRate);
-      const [discounts, setDiscounts] = useState(config.discounts);
-
-      const handleSave = () => {
-        onSave({
-          basePrice: parseFloat(basePrice),
-          shippingRate: parseFloat(shippingRate),
-          discounts: discounts.map(d => ({
-            min: parseInt(d.min),
-            percent: parseFloat(d.percent)
-          }))
-        });
-      };
-
-      return (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-bold mb-4">Pricing Configuration</h2>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Base Price ($)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={basePrice}
-                onChange={e => setBasePrice(e.target.value)}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Shipping Rate ($)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={shippingRate}
-                onChange={e => setShippingRate(e.target.value)}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Volume Discounts</label>
-              {discounts.map((discount, index) => (
-                <div key={index} className="flex gap-4 mb-2">
-                  <input
-                    type="number"
-                    value={discount.min}
-                    onChange={e => {
-                      const newDiscounts = [...discounts];
-                      newDiscounts[index].min = e.target.value;
-                      setDiscounts(newDiscounts);
-                    }}
-                    placeholder="Min quantity"
-                    className="block w-1/2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={discount.percent}
-                    onChange={e => {
-                      const newDiscounts = [...discounts];
-                      newDiscounts[index].percent = e.target.value;
-                      setDiscounts(newDiscounts);
-                    }}
-                    placeholder="Discount %"
-                    className="block w-1/2 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
+          <!-- Shipping Options -->
+          <div class="mb-6">
+            <h3 class="text-lg font-semibold mb-4">Shipping Options</h3>
+            <div class="space-y-4">
+              <div class="flex items-center justify-between p-4 border rounded">
+                <div>
+                  <h4 class="font-medium">Local Pickup</h4>
+                  <p class="text-sm text-gray-500">Free pickup option</p>
                 </div>
-              ))}
-              <button
-                onClick={() => setDiscounts([...discounts, { min: '', percent: '' }])}
-                className="mt-2 text-sm text-blue-600 hover:text-blue-800"
-              >
-                Add Discount Tier
-              </button>
+                <div class="flex items-center">
+                  <input type="checkbox" checked class="mr-2" id="local-pickup-enabled">
+                  <span class="text-gray-500">Free</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between p-4 border rounded">
+                <div>
+                  <h4 class="font-medium">Shipping</h4>
+                  <p class="text-sm text-gray-500">Standard shipping option</p>
+                </div>
+                <div class="flex items-center">
+                  <input type="checkbox" checked class="mr-2" id="shipping-enabled">
+                  <span class="mr-2">$</span>
+                  <input type="number" step="0.01" min="0" value="5.00" class="p-2 border rounded w-24" id="shipping-price">
+                </div>
+              </div>
             </div>
-            <button
-              onClick={handleSave}
-              className="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            >
-              Save Pricing
+          </div>
+
+          <div class="flex justify-end">
+            <button onclick="savePricing()" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">
+              Save Changes
             </button>
           </div>
         </div>
-      );
-    }
+      </div>
 
-    // OrderList Component
-    function OrderList({ orders, onUpdateStatus }) {
-      return (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-bold mb-4">Recent Orders</h2>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+      <!-- Bookkeeping Tab -->
+      <div id="bookkeeping" class="tab-content hidden">
+        <div class="bg-white rounded-lg shadow p-6">
+          <h2 class="text-xl font-bold mb-4">Bookkeeping</h2>
+          
+          <!-- Date Range Filter -->
+          <div class="mb-6 flex gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <input type="date" class="p-2 border rounded" id="start-date">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+              <input type="date" class="p-2 border rounded" id="end-date">
+            </div>
+            <div class="flex items-end">
+              <button onclick="filterBookkeeping()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                Filter
+              </button>
+            </div>
+          </div>
+
+          <!-- Summary -->
+          <div class="grid grid-cols-3 gap-4 mb-6">
+            <div class="bg-gray-50 p-4 rounded">
+              <h3 class="text-sm font-medium text-gray-500">Total Orders</h3>
+              <p class="text-2xl font-bold" id="total-orders">0</p>
+            </div>
+            <div class="bg-gray-50 p-4 rounded">
+              <h3 class="text-sm font-medium text-gray-500">Total Revenue</h3>
+              <p class="text-2xl font-bold" id="total-revenue">$0.00</p>
+            </div>
+            <div class="bg-gray-50 p-4 rounded">
+              <h3 class="text-sm font-medium text-gray-500">Average Order Value</h3>
+              <p class="text-2xl font-bold" id="avg-order-value">$0.00</p>
+            </div>
+          </div>
+
+          <!-- Order History -->
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
               <thead>
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order ID</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Order ID</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Items</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {orders.map(order => (
-                  <tr key={order.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.id}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(order.date).toLocaleDateString()}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{order.items.length} cards</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${order.total.toFixed(2)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <select
-                        value={order.status}
-                        onChange={e => onUpdateStatus(order.id, e.target.value)}
-                        className="text-sm rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                      >
-                        <option value="pending">Pending</option>
-                        <option value="processing">Processing</option>
-                        <option value="completed">Completed</option>
-                        <option value="cancelled">Cancelled</option>
-                      </select>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <button className="text-blue-600 hover:text-blue-800">View Details</button>
-                    </td>
-                  </tr>
-                ))}
+              <tbody id="bookkeeping-table" class="bg-white divide-y divide-gray-200">
+                <!-- Bookkeeping data will be populated here -->
               </tbody>
             </table>
           </div>
         </div>
-      );
-    }
+      </div>
 
-    // FileUpload Component
-    function FileUpload({ onUpload }) {
-      const [file, setFile] = useState(null);
-      const [uploading, setUploading] = useState(false);
-
-      const handleUpload = async () => {
-        if (!file) return;
-        setUploading(true);
-        try {
-          // TODO: Implement file upload
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          onUpload(file);
-          setFile(null);
-        } catch (error) {
-          console.error('Upload failed:', error);
-        } finally {
-          setUploading(false);
-        }
-      };
-
-      return (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h2 className="text-xl font-bold mb-4">Upload Card Backs</h2>
-          <div className="space-y-4">
-            <div className="flex items-center justify-center w-full">
-              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-gray-300 border-dashed rounded-lg cursor-pointer bg-gray-50 hover:bg-gray-100">
-                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                  <svg className="w-8 h-8 mb-4 text-gray-500" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 16">
-                    <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 13h3a3 3 0 0 0 0-6h-.025A5.56 5.56 0 0 0 16 6.5 5.5 5.5 0 0 0 5.207 5.021C5.137 5.017 5.071 5 5 5a4 4 0 0 0 0 8h2.167M10 15V6m0 0L8 8m2-2 2 2"/>
-                  </svg>
-                  <p className="mb-2 text-sm text-gray-500">
-                    <span className="font-semibold">Click to upload</span> or drag and drop
-                  </p>
-                  <p className="text-xs text-gray-500">PNG or JPG (MAX. 800x600px)</p>
+      <!-- Card Backs Tab -->
+      <div id="cardbacks" class="tab-content hidden">
+        <div class="bg-white rounded-lg shadow p-6">
+          <h2 class="text-xl font-bold mb-4">Card Back Management</h2>
+          
+          <!-- Upload New Card Back -->
+          <div class="mb-6">
+            <h3 class="text-lg font-semibold mb-4">Upload New Card Back</h3>
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+              <input type="file" id="cardback-upload" class="hidden" accept="image/*">
+              <label for="cardback-upload" class="cursor-pointer">
+                <div class="flex flex-col items-center">
+                  <i class="fas fa-upload text-3xl text-gray-400 mb-2"></i>
+                  <p class="text-gray-600">Click to upload or drag and drop</p>
+                  <p class="text-sm text-gray-500">PNG or JPG (MAX. 800x600px)</p>
                 </div>
-                <input
-                  type="file"
-                  className="hidden"
-                  accept="image/*"
-                  onChange={e => setFile(e.target.files[0])}
-                />
               </label>
             </div>
-            {file && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-500">{file.name}</span>
-                <button
-                  onClick={handleUpload}
-                  disabled={uploading}
-                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50"
-                >
-                  {uploading ? 'Uploading...' : 'Upload'}
-                </button>
-              </div>
-            )}
+          </div>
+
+          <!-- Existing Card Backs -->
+          <div>
+            <h3 class="text-lg font-semibold mb-4">Existing Card Backs</h3>
+            <div id="cardbacks-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <!-- Card backs will be populated here -->
+            </div>
           </div>
         </div>
-      );
-    }
+      </div>
 
-    // Main App Component
-    function App() {
-      const [activeTab, setActiveTab] = useState('orders');
-      const [pricingConfig, setPricingConfig] = useState({
-        basePrice: 0.50,
-        shippingRate: 5.00,
-        discounts: [
-          { min: 51, percent: 0.10 },
-          { min: 10, percent: 0.05 }
-        ]
+      <!-- Custom Cards Tab -->
+      <div id="customcards" class="tab-content hidden">
+        <div class="bg-white rounded-lg shadow p-6">
+          <h2 class="text-xl font-bold mb-4">Custom Card Management</h2>
+          
+          <!-- Add Custom Card -->
+          <div class="mb-6">
+            <h3 class="text-lg font-semibold mb-4">Add Custom Card</h3>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Card Name</label>
+                <input type="text" class="w-full p-2 border rounded" id="custom-card-name">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Set Code</label>
+                <input type="text" class="w-full p-2 border rounded" id="custom-card-set">
+              </div>
+              <div class="col-span-2">
+                <label class="block text-sm font-medium text-gray-700 mb-1">Card Image</label>
+                <input type="file" class="w-full p-2 border rounded" accept="image/*" id="custom-card-image">
+              </div>
+            </div>
+            <button onclick="addCustomCard()" class="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+              Add Card
+            </button>
+          </div>
+
+          <!-- Existing Custom Cards -->
+          <div>
+            <h3 class="text-lg font-semibold mb-4">Existing Custom Cards</h3>
+            <div id="custom-cards-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <!-- Custom cards will be populated here -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Tab Management
+    function showTab(tabId) {
+      // Hide all tab contents
+      document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.add('hidden');
       });
-      const [orders, setOrders] = useState([]);
-
-      // Load orders from localStorage
-      useEffect(() => {
-        const savedOrders = localStorage.getItem('admin_orders');
-        if (savedOrders) {
-          setOrders(JSON.parse(savedOrders));
-        }
-      }, []);
-
-      // Save orders to localStorage
-      useEffect(() => {
-        localStorage.setItem('admin_orders', JSON.stringify(orders));
-      }, [orders]);
-
-      const handleUpdateStatus = (orderId, newStatus) => {
-        setOrders(prev => prev.map(order =>
-          order.id === orderId ? { ...order, status: newStatus } : order
-        ));
-      };
-
-      const handleSavePricing = (newConfig) => {
-        setPricingConfig(newConfig);
-        // TODO: Save to backend
-      };
-
-      const handleFileUpload = (file) => {
-        // TODO: Implement file upload to backend
-        console.log('File uploaded:', file.name);
-      };
-
-      return (
-        <main className="container mx-auto p-4 max-w-7xl">
-          <header className="mb-6">
-            <h1 className="text-3xl font-bold text-center mb-2">Admin Panel</h1>
-            <p className="text-center text-gray-600">Manage orders, pricing, and card backs</p>
-          </header>
-
-          <div className="mb-6">
-            <nav className="flex space-x-4">
-              <button
-                onClick={() => setActiveTab('orders')}
-                className={`px-4 py-2 rounded ${
-                  activeTab === 'orders'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Orders
-              </button>
-              <button
-                onClick={() => setActiveTab('pricing')}
-                className={`px-4 py-2 rounded ${
-                  activeTab === 'pricing'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Pricing
-              </button>
-              <button
-                onClick={() => setActiveTab('uploads')}
-                className={`px-4 py-2 rounded ${
-                  activeTab === 'uploads'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Uploads
-              </button>
-            </nav>
-          </div>
-
-          <div className="space-y-6">
-            {activeTab === 'orders' && (
-              <OrderList orders={orders} onUpdateStatus={handleUpdateStatus} />
-            )}
-            {activeTab === 'pricing' && (
-              <PricingConfig config={pricingConfig} onSave={handleSavePricing} />
-            )}
-            {activeTab === 'uploads' && (
-              <FileUpload onUpload={handleFileUpload} />
-            )}
-          </div>
-        </main>
-      );
+      
+      // Remove active state from all tab buttons
+      document.querySelectorAll('.tab-button').forEach(button => {
+        button.classList.remove('border-blue-500', 'text-blue-600');
+        button.classList.add('border-transparent');
+      });
+      
+      // Show selected tab content
+      document.getElementById(tabId).classList.remove('hidden');
+      
+      // Add active state to selected tab button
+      const activeButton = document.querySelector(`[data-tab="${tabId}"]`);
+      activeButton.classList.remove('border-transparent');
+      activeButton.classList.add('border-blue-500', 'text-blue-600');
+      
+      // Load tab-specific data
+      switch(tabId) {
+        case 'orders':
+          loadOrders();
+          break;
+        case 'pricing':
+          loadPricing();
+          break;
+        case 'bookkeeping':
+          loadBookkeeping();
+          break;
+        case 'cardbacks':
+          loadCardBacks();
+          break;
+        case 'customcards':
+          loadCustomCards();
+          break;
+      }
     }
 
-    // Wrap the entire app in the error boundary
-    const AppWithErrorBoundary = () => (
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
-    );
+    // Orders Tab Functions
+    function loadOrders() {
+      const orders = JSON.parse(localStorage.getItem('adminOrders') || '[]');
+      const ordersContainer = document.getElementById('orders-list');
+      
+      if (orders.length === 0) {
+        ordersContainer.innerHTML = '<p class="text-center text-gray-500">No orders found.</p>';
+        return;
+      }
 
-    // Render the app
-    ReactDOM.render(
-      <AppWithErrorBoundary />,
-      document.getElementById('root')
-    );
+      ordersContainer.innerHTML = orders.map(order => `
+        <div class="bg-white rounded-lg shadow p-6">
+          <div class="flex justify-between items-start mb-4">
+            <div>
+              <h2 class="text-xl font-bold">Order #${order.id}</h2>
+              <p class="text-sm text-gray-500">${new Date(order.timestamp).toLocaleString()}</p>
+            </div>
+            <div class="flex gap-2">
+              <select onchange="updateOrderStatus('${order.id}', this.value)" class="p-2 border rounded">
+                <option value="Not Started" ${order.status === 'Not Started' ? 'selected' : ''}>Not Started</option>
+                <option value="In Progress" ${order.status === 'In Progress' ? 'selected' : ''}>In Progress</option>
+                <option value="Completed" ${order.status === 'Completed' ? 'selected' : ''}>Completed</option>
+              </select>
+              <button onclick="copyCardList('${order.id}')" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+                Copy Card List
+              </button>
+              <button onclick="deleteOrder('${order.id}')" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
+                Delete
+              </button>
+            </div>
+          </div>
+          
+          <div class="mb-4">
+            <h3 class="font-semibold mb-2">Card List:</h3>
+            <pre class="bg-gray-50 p-4 rounded whitespace-pre-wrap">${order.cards}</pre>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <h3 class="font-semibold mb-2">Add-ons:</h3>
+              <ul class="list-disc list-inside">
+                ${order.addOns.map(id => {
+                  const addOn = {
+                    mystery: 'Mystery Proxy',
+                    booster: 'Proxy Booster Pack',
+                    sleeves: 'Card Sleeves',
+                    box: 'Card Box'
+                  }[id];
+                  return `<li>${addOn}</li>`;
+                }).join('')}
+              </ul>
+            </div>
+            <div>
+              <h3 class="font-semibold mb-2">Shipping:</h3>
+              <p>${order.shipping === 'ship' ? 'Ship ($5.00)' : 'Local Pickup (Free)'}</p>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function copyCardList(orderId) {
+      const orders = JSON.parse(localStorage.getItem('adminOrders') || '[]');
+      const order = orders.find(o => o.id === orderId);
+      if (order) {
+        navigator.clipboard.writeText(order.cards)
+          .then(() => alert('Card list copied to clipboard!'))
+          .catch(err => console.error('Failed to copy:', err));
+      }
+    }
+
+    function deleteOrder(orderId) {
+      if (confirm('Are you sure you want to delete this order?')) {
+        const orders = JSON.parse(localStorage.getItem('adminOrders') || '[]');
+        const updatedOrders = orders.filter(o => o.id !== orderId);
+        localStorage.setItem('adminOrders', JSON.stringify(updatedOrders));
+        loadOrders();
+      }
+    }
+
+    function updateOrderStatus(orderId, newStatus) {
+      const orders = JSON.parse(localStorage.getItem('adminOrders') || '[]');
+      const orderIndex = orders.findIndex(o => o.id === orderId);
+      if (orderIndex !== -1) {
+        orders[orderIndex].status = newStatus;
+        localStorage.setItem('adminOrders', JSON.stringify(orders));
+      }
+    }
+
+    // Pricing Tab Functions
+    function loadPricing() {
+      const config = JSON.parse(localStorage.getItem('pricingConfig') || JSON.stringify({
+        basePrice: 0.50,
+        volumeDiscounts: [
+          { min: 8, percent: 0.10 },
+          { min: 16, percent: 0.15 },
+          { min: 24, percent: 0.20 }
+        ],
+        shipping: {
+          localPickup: { enabled: true, price: 0 },
+          shipping: { enabled: true, price: 5.00 }
+        }
+      }));
+
+      // Set base price
+      document.getElementById('base-price').value = config.basePrice;
+
+      // Set shipping options
+      document.getElementById('local-pickup-enabled').checked = config.shipping.localPickup.enabled;
+      document.getElementById('shipping-enabled').checked = config.shipping.shipping.enabled;
+      document.getElementById('shipping-price').value = config.shipping.shipping.price;
+
+      // Load discount tiers
+      const discountTiers = document.getElementById('discount-tiers');
+      discountTiers.innerHTML = config.volumeDiscounts.map((tier, index) => `
+        <div class="flex items-center gap-4 p-4 border rounded">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Minimum Quantity</label>
+            <input type="number" min="1" value="${tier.min}" class="p-2 border rounded w-24" onchange="updateDiscountTier(${index}, 'min', this.value)">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Discount (%)</label>
+            <input type="number" min="0" max="100" value="${tier.percent * 100}" class="p-2 border rounded w-24" onchange="updateDiscountTier(${index}, 'percent', this.value / 100)">
+          </div>
+          <button onclick="removeDiscountTier(${index})" class="text-red-500 hover:text-red-700">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function addDiscountTier() {
+      const config = JSON.parse(localStorage.getItem('pricingConfig') || '{}');
+      config.volumeDiscounts = config.volumeDiscounts || [];
+      config.volumeDiscounts.push({ min: 8, percent: 0.10 });
+      localStorage.setItem('pricingConfig', JSON.stringify(config));
+      loadPricing();
+    }
+
+    function updateDiscountTier(index, field, value) {
+      const config = JSON.parse(localStorage.getItem('pricingConfig') || '{}');
+      config.volumeDiscounts[index][field] = parseFloat(value);
+      localStorage.setItem('pricingConfig', JSON.stringify(config));
+    }
+
+    function removeDiscountTier(index) {
+      const config = JSON.parse(localStorage.getItem('pricingConfig') || '{}');
+      config.volumeDiscounts.splice(index, 1);
+      localStorage.setItem('pricingConfig', JSON.stringify(config));
+      loadPricing();
+    }
+
+    function savePricing() {
+      const config = {
+        basePrice: parseFloat(document.getElementById('base-price').value),
+        volumeDiscounts: Array.from(document.querySelectorAll('#discount-tiers > div')).map(div => ({
+          min: parseInt(div.querySelector('input[type="number"]:first-child').value),
+          percent: parseFloat(div.querySelector('input[type="number"]:last-child').value) / 100
+        })),
+        shipping: {
+          localPickup: {
+            enabled: document.getElementById('local-pickup-enabled').checked,
+            price: 0
+          },
+          shipping: {
+            enabled: document.getElementById('shipping-enabled').checked,
+            price: parseFloat(document.getElementById('shipping-price').value)
+          }
+        }
+      };
+      localStorage.setItem('pricingConfig', JSON.stringify(config));
+      alert('Pricing configuration saved!');
+    }
+
+    // Bookkeeping Tab Functions
+    function loadBookkeeping() {
+      const orders = JSON.parse(localStorage.getItem('adminOrders') || '[]');
+      const startDate = document.getElementById('start-date').value;
+      const endDate = document.getElementById('end-date').value;
+
+      let filteredOrders = orders;
+      if (startDate && endDate) {
+        filteredOrders = orders.filter(order => {
+          const orderDate = new Date(order.timestamp);
+          return orderDate >= new Date(startDate) && orderDate <= new Date(endDate);
+        });
+      }
+
+      // Update summary
+      document.getElementById('total-orders').textContent = filteredOrders.length;
+      const totalRevenue = filteredOrders.reduce((sum, order) => sum + calculateOrderTotal(order), 0);
+      document.getElementById('total-revenue').textContent = `$${totalRevenue.toFixed(2)}`;
+      document.getElementById('avg-order-value').textContent = 
+        filteredOrders.length ? `$${(totalRevenue / filteredOrders.length).toFixed(2)}` : '$0.00';
+
+      // Update table
+      const table = document.getElementById('bookkeeping-table');
+      table.innerHTML = filteredOrders.map(order => `
+        <tr>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+            ${new Date(order.timestamp).toLocaleDateString()}
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+            ${order.id}
+          </td>
+          <td class="px-6 py-4 text-sm text-gray-500">
+            ${order.cards.split('\n').length} cards
+          </td>
+          <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+            $${calculateOrderTotal(order).toFixed(2)}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function calculateOrderTotal(order) {
+      const config = JSON.parse(localStorage.getItem('pricingConfig') || '{}');
+      const basePrice = config.basePrice || 0.50;
+      const cardCount = order.cards.split('\n').length;
+      const cardsInTier = Math.floor(cardCount / 8) * 8;
+      const extraCards = cardCount % 8;
+      
+      const tierPrice = basePrice * (1 - (config.volumeDiscounts?.find(d => d.min <= cardsInTier)?.percent || 0));
+      const extraPrice = extraCards * basePrice;
+      
+      const subtotal = (cardsInTier * tierPrice) + extraPrice;
+      const shippingCost = order.shipping === 'ship' ? (config.shipping?.shipping?.price || 5.00) : 0;
+      
+      return subtotal + shippingCost;
+    }
+
+    function filterBookkeeping() {
+      loadBookkeeping();
+    }
+
+    // Card Backs Tab Functions
+    function loadCardBacks() {
+      const cardbacks = JSON.parse(localStorage.getItem('cardbacks') || '[]');
+      const grid = document.getElementById('cardbacks-grid');
+      
+      if (cardbacks.length === 0) {
+        grid.innerHTML = '<p class="text-center text-gray-500 col-span-full">No card backs found.</p>';
+        return;
+      }
+
+      grid.innerHTML = cardbacks.map((back, index) => `
+        <div class="relative group">
+          <img src="${back.url}" alt="Card Back ${index + 1}" class="w-full h-48 object-contain border rounded">
+          <div class="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            <button onclick="deleteCardBack(${index})" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
+              Delete
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function deleteCardBack(index) {
+      if (confirm('Are you sure you want to delete this card back?')) {
+        const cardbacks = JSON.parse(localStorage.getItem('cardbacks') || '[]');
+        cardbacks.splice(index, 1);
+        localStorage.setItem('cardbacks', JSON.stringify(cardbacks));
+        loadCardBacks();
+      }
+    }
+
+    // Custom Cards Tab Functions
+    function loadCustomCards() {
+      const customCards = JSON.parse(localStorage.getItem('customCards') || '[]');
+      const grid = document.getElementById('custom-cards-grid');
+      
+      if (customCards.length === 0) {
+        grid.innerHTML = '<p class="text-center text-gray-500 col-span-full">No custom cards found.</p>';
+        return;
+      }
+
+      grid.innerHTML = customCards.map((card, index) => `
+        <div class="relative group">
+          <img src="${card.imageUrl}" alt="${card.name}" class="w-full h-48 object-contain border rounded">
+          <div class="absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            <button onclick="deleteCustomCard(${index})" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">
+              Delete
+            </button>
+          </div>
+          <div class="mt-2">
+            <p class="font-medium">${card.name}</p>
+            <p class="text-sm text-gray-500">${card.set}</p>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function addCustomCard() {
+      const name = document.getElementById('custom-card-name').value;
+      const set = document.getElementById('custom-card-set').value;
+      const imageFile = document.getElementById('custom-card-image').files[0];
+
+      if (!name || !set || !imageFile) {
+        alert('Please fill in all fields and select an image.');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const customCards = JSON.parse(localStorage.getItem('customCards') || '[]');
+        customCards.push({
+          name,
+          set,
+          imageUrl: e.target.result
+        });
+        localStorage.setItem('customCards', JSON.stringify(customCards));
+        loadCustomCards();
+        
+        // Clear form
+        document.getElementById('custom-card-name').value = '';
+        document.getElementById('custom-card-set').value = '';
+        document.getElementById('custom-card-image').value = '';
+      };
+      reader.readAsDataURL(imageFile);
+    }
+
+    function deleteCustomCard(index) {
+      if (confirm('Are you sure you want to delete this custom card?')) {
+        const customCards = JSON.parse(localStorage.getItem('customCards') || '[]');
+        customCards.splice(index, 1);
+        localStorage.setItem('customCards', JSON.stringify(customCards));
+        loadCustomCards();
+      }
+    }
+
+    // Initialize the first tab
+    document.addEventListener('DOMContentLoaded', () => {
+      showTab('orders');
+    });
   </script>
 </body>
 </html>
